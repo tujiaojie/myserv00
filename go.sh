@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# 你的专属一键全家桶：节点 + Alist云盘 + 自动保活
+# 你的专属一键全家桶：节点 + Alist(40759端口) + 自动保活
 # ==========================================
 
 # --- 1. 安装节点 (Serv00 专用版) ---
@@ -18,18 +18,26 @@ tar -zxvf alist-freebsd-amd64.tar.gz
 chmod +x alist
 rm alist-freebsd-amd64.tar.gz
 
-# 初始化 Alist 密码并启动 (默认端口5244，稍后你在后台改)
+# --- 2.5 核心步骤：预设端口并启动 ---
+echo "正在配置专属端口 40759..."
 ./alist admin set admin123
+# 先生成配置文件
+nohup ./alist server > /dev/null 2>&1 &
+sleep 2
+pkill alist
+# 强制将默认的 5244 替换为 40759
+if [ -f "~/alist/data/config.json" ]; then
+    sed -i 's/5244/40759/g' ~/alist/data/config.json
+fi
+# 重新启动
 nohup ./alist server > /dev/null 2>&1 &
 
 # --- 3. 配置自动保活 (节点 + Alist) ---
 echo "第三步：正在配置全自动双重保活系统..."
-# 下载保活脚本
 curl -Ls https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/serv00keep.sh -o ~/serv00keep.sh
 chmod +x ~/serv00keep.sh
 
-# 关键：修改保活脚本，让它同时巡逻 Alist
-# 如果发现 alist 没运行，就启动它
+# 关键：修改保活脚本，让它以后也用 40759 端口检查启动
 if ! grep -q "alist" ~/serv00keep.sh; then
     echo 'if ! pgrep -x "alist" > /dev/null; then cd ~/alist && nohup ./alist server > /dev/null 2>&1 & fi' >> ~/serv00keep.sh
 fi
@@ -40,6 +48,7 @@ fi
 echo "------------------------------------------------"
 echo "恭喜！超级全家桶配置已全部完成。"
 echo "1. 节点安装流程已结束。"
-echo "2. Alist 已安装，管理账号: admin 密码: admin123"
-echo "3. 双重保活已设为每 5 分钟巡逻一次。"
+echo "2. Alist 已安装并运行在端口: 40759"
+echo "3. 管理账号: admin 密码: admin123"
+echo "4. 双重保活已设为每 5 分钟巡逻一次。"
 echo "------------------------------------------------"
