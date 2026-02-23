@@ -2,7 +2,7 @@
 
 # --- 基础配置 ---
 USER_NAME="tujiaojie"
-REPO_NAME="my-serv00"
+REPO_NAME="myserv00"
 WORKDIR="$HOME/mynode"
 SB_BIN="$WORKDIR/sing-box"
 CONFIG="$WORKDIR/config.json"
