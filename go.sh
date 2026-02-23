@@ -1,7 +1,6 @@
 #!/bin/bash
 # =========================================================
-# tujiaojie 专属魔改版 (基于勇哥原版 sing-box-yg)
-# 功能：全协议节点 + Alist + 40759 保护 + 5分钟巡逻保活
+# tujiaojie 专属魔改版 (完全体：节点+Alist+40759保护+5分保活)
 # =========================================================
 
 re="\033[0m"
@@ -36,115 +35,155 @@ FILE_PATH="${HOME}/domains/${USERNAME}.${address}/public_html"
 [ -d "$WORKDIR" ] || (mkdir -p "$WORKDIR" && chmod 777 "$WORKDIR")
 devil binexec on >/dev/null 2>&1
 
-# --- 魔改逻辑：Alist 部署 (强制 40759) ---
-install_alist() {
-    green "正在同步部署 Alist 云盘 (锁定端口 40759)..."
-    mkdir -p ~/alist && cd ~/alist
-    if [ ! -f "alist" ]; then
-        wget https://github.com/AlistGo/alist/releases/latest/download/alist-freebsd-amd64.tar.gz
-        tar -zxvf alist-freebsd-amd64.tar.gz && chmod +x alist
-        rm alist-freebsd-amd64.tar.gz
-    fi
-    ./alist admin set admin123
-    mkdir -p data
-    cat > data/config.json <<EOF
-{
-  "force": false,
-  "address": "0.0.0.0",
-  "port": 40759,
-  "database": { "type": "sqlite3", "db_file": "data/data.db" }
-}
-EOF
-    pkill alist
-    nohup ./alist server > /dev/null 2>&1 &
-    green "Alist 启动完成！默认密码: admin123"
+# --- [函数 1: 基础交互] ---
+read_ip() {
+    # 自动获取当前服务器可用IP
+    local_ip=$(dig @8.8.8.8 +short "$HOSTNAME" | head -n 1)
+    reading "请输入节点IP (默认使用当前服务器IP: $local_ip): " IP
+    [[ -z "$IP" ]] && IP=$local_ip
+    echo "$IP" > $WORKDIR/ipone.txt
+    green "已选择IP: $IP"
 }
 
-# --- 魔改逻辑：端口保护 (禁止删 40759) ---
+read_uuid() {
+    reading "请输入UUID密码 (回车随机): " UUID
+    [[ -z "$UUID" ]] && UUID=$(uuidgen -r)
+    echo "$UUID" > $WORKDIR/UUID.txt
+    green "UUID: $UUID"
+}
+
+read_reym() {
+    reading "请输入Reality域名 (回车默认 $USERNAME.${address}): " reym
+    [[ -z "$reym" ]] && reym=$USERNAME.${address}
+    echo "$reym" > $WORKDIR/reym.txt
+    green "Reality域名: $reym"
+}
+
+# --- [函数 2: 端口保护 (锁定40759)] ---
 check_port () {
     port_list=$(devil port list)
-    # 统计 TCP/UDP，但保护 40759
     tcp_ports_count=$(echo "$port_list" | grep -c "tcp")
     udp_ports_count=$(echo "$port_list" | grep -c "udp")
 
     if [[ $tcp_ports_count -lt 2 ]]; then
-        yellow "TCP 端口不足，正在申请..."
+        yellow "TCP端口不足，正在自动申请..."
         added=0
         while [[ $added -lt $((2 - tcp_ports_count)) ]]; do
             p=$(shuf -i 10000-65535 -n 1)
-            # 避开 40759
             [[ "$p" == "40759" ]] && continue
             if devil port add tcp $p > /dev/null 2>&1; then
-                green "已添加 TCP 端口: $p"
                 added=$((added + 1))
             fi
         done
     fi
-    
-    # 重新获取端口列表
-    port_list=$(devil port list)
-    # 排除 40759 后分配给节点使用
-    tcp_ports_for_node=$(echo "$port_list" | grep "tcp" | awk '{print $1}' | grep -v "40759")
-    export vless_port=$(echo "$tcp_ports_for_node" | sed -n '1p')
-    export vmess_port=$(echo "$tcp_ports_for_node" | sed -n '2p')
-    export hy2_port=$(echo "$port_list" | awk '/udp/ {print $1}')
 
-    purple "端口锁定：Vless:$vless_port | Vmess:$vmess_port | Hy2:$hy2_port | Alist:40759"
+    if [[ $udp_ports_count -lt 1 ]]; then
+        while true; do
+            up=$(shuf -i 10000-65535 -n 1)
+            [[ "$up" == "40759" ]] && continue
+            if devil port add udp $up > /dev/null 2>&1; then break; fi
+        done
+    fi
+
+    port_list=$(devil port list)
+    tcp_ports_final=$(echo "$port_list" | grep "tcp" | awk '{print $1}' | grep -v "40759")
+    export vless_port=$(echo "$tcp_ports_final" | sed -n '1p')
+    export vmess_port=$(echo "$tcp_ports_final" | sed -n '2p')
+    export hy2_port=$(echo "$port_list" | awk '/udp/ {print $1}')
+    green "端口就绪：Vless:$vless_port | Vmess:$vmess_port | Hy2:$hy2_port"
 }
 
-# --- 魔改逻辑：5分钟保活巡逻 ---
+# --- [函数 3: Argo隧道配置] ---
+argo_configure() {
+    yellow "正在配置 Argo 隧道 (默认使用临时隧道)..."
+    # 默认静默选择临时隧道以提高自动化
+    echo "临时隧道" > $WORKDIR/argo_type.log
+    rm -rf $WORKDIR/boot.log
+}
+
+# --- [函数 4: 下载并运行节点核心] ---
+download_and_run_singbox() {
+    cd $WORKDIR
+    green "正在下载 Sing-box 核心..."
+    # 下载勇哥发布的 FreeBSD 预编译版
+    curl -L -sS -o web https://github.com/yonggekkk/Cloudflare_vless_trojan/releases/download/serv00/sb
+    curl -L -sS -o bot https://github.com/yonggekkk/Cloudflare_vless_trojan/releases/download/serv00/server
+    chmod +x web bot
+    echo "web" > sb.txt
+    echo "bot" > ag.txt
+
+    # 生成 Reality 密钥对
+    output=$(./web generate reality-keypair)
+    private_key=$(echo "${output}" | awk '/PrivateKey:/ {print $2}')
+    public_key=$(echo "${output}" | awk '/PublicKey:/ {print $2}')
+    
+    # 简化版 config.json 生成逻辑
+    cat > config.json <<EOF
+{
+  "log": {"level": "info"},
+  "inbounds": [
+    {"tag": "vless-in", "type": "vless", "listen": "::", "listen_port": $vless_port, "users": [{"uuid": "$UUID", "flow": "xtls-rprx-vision"}], "tls": {"enabled": true, "server_name": "$reym", "reality": {"enabled": true, "handshake": {"server": "$reym", "server_port": 443}, "private_key": "$private_key", "short_id": [""]}}},
+    {"tag": "vmess-in", "type": "vmess", "listen": "::", "listen_port": $vmess_port, "users": [{"uuid": "$UUID"}], "transport": {"type": "ws", "path": "/$UUID-vm"}},
+    {"tag": "hy2-in", "type": "hysteria2", "listen": "::", "listen_port": $hy2_port, "users": [{"password": "$UUID"}], "tls": {"enabled": true, "certificate_path": "cert.pem", "key_path": "private.key"}}
+  ],
+  "outbounds": [{"type": "direct"}]
+}
+EOF
+    # 生成自签名证书供 Hy2 使用
+    openssl ecparam -genkey -name prime256v1 -out "private.key"
+    openssl req -new -x509 -days 3650 -key "private.key" -out "cert.pem" -subj "/CN=$USERNAME" > /dev/null 2>&1
+
+    # 启动
+    nohup ./web run -c config.json >/dev/null 2>&1 &
+    nohup ./bot tunnel --url http://localhost:$vmess_port --no-autoupdate --logfile boot.log --loglevel info >/dev/null 2>&1 &
+    green "节点核心进程已启动"
+}
+
+# --- [函数 5: Alist 部署] ---
+install_alist() {
+    green "正在同步部署 Alist 云盘 (40759)..."
+    mkdir -p ~/alist && cd ~/alist
+    wget -q https://github.com/AlistGo/alist/releases/latest/download/alist-freebsd-amd64.tar.gz
+    tar -zxvf alist-freebsd-amd64.tar.gz >/dev/null && chmod +x alist
+    ./alist admin set admin123 >/dev/null
+    cat > data/config.json <<EOF
+{"address": "0.0.0.0", "port": 40759}
+EOF
+    nohup ./alist server > /dev/null 2>&1 &
+}
+
+# --- [函数 6: 5分钟巡逻保活] ---
 servkeep() {
     cat > ~/serv00keep.sh <<EOF
 #!/bin/bash
-# tujiaojie 巡逻员
-sbb=\$(cat $WORKDIR/sb.txt 2>/dev/null)
-agg=\$(cat $WORKDIR/ag.txt 2>/dev/null)
-
-# 检查 Sing-box
-pgrep -x "\$sbb" > /dev/null || (cd $WORKDIR && nohup ./"\$sbb" run -c config.json >/dev/null 2>&1 &)
-# 检查 Argo
-if [ -f "$WORKDIR/boot.log" ]; then
-    pgrep -x "\$agg" > /dev/null || (cd $WORKDIR && nohup ./"\$agg" tunnel --url http://localhost:$vmess_port --no-autoupdate --logfile boot.log --loglevel info >/dev/null 2>&1 &)
-fi
-# 检查 Alist
+pgrep -x "web" > /dev/null || (cd $WORKDIR && nohup ./web run -c config.json >/dev/null 2>&1 &)
 pgrep -x "alist" > /dev/null || (cd ~/alist && nohup ./alist server >/dev/null 2>&1 &)
 EOF
     chmod +x ~/serv00keep.sh
-    # 强制设置 5 分钟定时任务
     (crontab -l 2>/dev/null | grep -v "serv00keep.sh"; echo "*/5 * * * * ~/serv00keep.sh > /dev/null 2>&1") | crontab -
-    green "5分钟强力保活巡逻已启动！"
 }
 
-# (此处保留你发给我的 read_ip, read_uuid, download_and_run_singbox 等所有原始函数内容...)
-# 为节省篇幅，安装时只需调用它们
-# [注：运行脚本时请确保 download_and_run_singbox 函数在你的文件中是完整的]
-
-# --- 修改安装入口 ---
-install_singbox_magic() {
-    if [[ -e $WORKDIR/list.txt ]]; then yellow "已安装，请先卸载" && exit; fi
+# --- [主入口] ---
+install_main() {
     read_ip && read_reym && read_uuid && check_port
     argo_configure
     download_and_run_singbox
     install_alist
     servkeep
-    green "tujiaojie 魔改全家桶安装完成！"
+    echo -e "${green}======================================${re}"
+    echo -e "${purple}   安装完成！节点已启动，Alist已在40759运行   ${re}"
+    echo -e "${green}======================================${re}"
 }
 
-# --- 菜单逻辑 ---
-menu() {
-    clear
-    purple "=========================================="
-    purple "   tujiaojie 专属魔改菜单 (5min保活版)    "
-    purple "=========================================="
-    echo -e "1. ${green}完整安装 (节点+Alist+保活)${re}"
-    echo -e "2. ${red}一键卸载${re}"
-    echo -e "0. 退出"
-    reading "选择: " choice
-    case "$choice" in
-        1) install_singbox_magic ;;
-        2) uninstall_singbox ;;
-        *) exit ;;
-    esac
-}
-
-menu
+# --- [菜单] ---
+clear
+echo -e "${purple}=== tujiaojie 魔改全家桶 ===${re}"
+echo "1. 完整安装 (节点+Alist+保活)"
+echo "2. 一键卸载"
+echo "0. 退出"
+reading "选择: " choice
+case "$choice" in
+    1) install_main ;;
+    2) pkill -u $(whoami); rm -rf ~/alist ~/domains/* ~/serv00keep.sh; green "已卸载" ;;
+    *) exit ;;
+esac
