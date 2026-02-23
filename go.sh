@@ -1,6 +1,6 @@
 #!/bin/bash
 # =========================================================
-# tujiaojie 专属完全体 (勇哥节点 + Alist + 40759保护 + 5分保活)
+# tujiaojie 专属终极版 (节点链接显示 + Alist + 40759 + 5分保活)
 # =========================================================
 
 re="\033[0m"
@@ -22,98 +22,67 @@ hona=$(hostname | cut -d. -f2)
 
 if [ "$hona" = "serv00" ]; then
     address="serv00.net"
-    keep_path="${HOME}/domains/${snb}.${USERNAME}.serv00.net/public_nodejs"
-    [ -d "$keep_path" ] || mkdir -p "$keep_path"
 else
     address="useruno.com"
 fi
 
 WORKDIR="${HOME}/domains/${USERNAME}.${address}/logs"
-devil www add ${USERNAME}.${address} php > /dev/null 2>&1
-FILE_PATH="${HOME}/domains/${USERNAME}.${address}/public_html"
-[ -d "$FILE_PATH" ] || mkdir -p "$FILE_PATH"
-[ -d "$WORKDIR" ] || (mkdir -p "$WORKDIR" && chmod 777 "$WORKDIR")
+[ -d "$WORKDIR" ] || mkdir -p "$WORKDIR"
 devil binexec on >/dev/null 2>&1
 
-# --- 核心函数库 (从你提供的勇哥代码中完整提取并适配) ---
-
+# --- 基础交互 ---
 read_ip() {
-    # 简化获取可用IP逻辑
     IP=$(dig @8.8.8.8 +short "$HOSTNAME" | head -n 1)
     reading "请输入节点IP (默认回车: $IP): " input_ip
     [[ -n "$input_ip" ]] && IP=$input_ip
     echo "$IP" > $WORKDIR/ipone.txt
-    green "已选择IP: $IP"
 }
 
 read_uuid() {
-    reading "请输入UUID密码 (回车随机): " UUID
+    reading "请输入统一UUID (回车随机): " UUID
     [[ -z "$UUID" ]] && UUID=$(uuidgen -r)
     echo "$UUID" > $WORKDIR/UUID.txt
-    green "UUID: $UUID"
 }
 
 read_reym() {
-    reading "请输入reality域名 (回车默认 $USERNAME.${address}): " reym
+    reading "请输入Reality域名 (回车默认 $USERNAME.${address}): " reym
     [[ -z "$reym" ]] && reym=$USERNAME.${address}
     echo "$reym" > $WORKDIR/reym.txt
-    green "域名: $reym"
 }
 
-# --- 端口保护：绝对不碰 40759 ---
+# --- 端口保护 (锁定40759) ---
 check_port () {
-    port_list=$(devil port list)
-    tcp_count=$(echo "$port_list" | grep -c "tcp")
-    udp_count=$(echo "$port_list" | grep -c "udp")
-
-    if [[ $tcp_count -lt 2 ]]; then
-        added=0
-        while [[ $added -lt $((2 - tcp_count)) ]]; do
-            p=$(shuf -i 10000-65535 -n 1)
-            [[ "$p" == "40759" ]] && continue
-            if devil port add tcp $p > /dev/null 2>&1; then added=$((added + 1)); fi
-        done
-    fi
-    if [[ $udp_count -lt 1 ]]; then
-        while true; do
-            up=$(shuf -i 10000-65535 -n 1)
-            [[ "$up" == "40759" ]] && continue
-            if devil port add udp $up > /dev/null 2>&1; then break; fi
-        done
-    fi
-
-    # 分配非 40759 的端口给节点
     port_list=$(devil port list)
     tcp_ports=$(echo "$port_list" | grep "tcp" | awk '{print $1}' | grep -v "40759")
     export vless_port=$(echo "$tcp_ports" | sed -n '1p')
     export vmess_port=$(echo "$tcp_ports" | sed -n '2p')
     export hy2_port=$(echo "$port_list" | awk '/udp/ {print $1}')
-    purple "分配完成：Vless:$vless_port, Vmess:$vmess_port, Hy2:$hy2_port"
+    
+    if [[ -z "$vless_port" || -z "$vmess_port" ]]; then
+        red "端口不足，请先在面板手动多开几个TCP端口！"
+        exit 1
+    fi
 }
 
-argo_configure() {
-    green "使用临时隧道配置..."
-    rm -rf $WORKDIR/boot.log
-}
-
+# --- 节点安装 ---
 download_and_run_singbox() {
     cd $WORKDIR
-    green "正在从勇哥源下载 Sing-box 核心..."
+    green "正在下载勇哥核心文件..."
     curl -L -sS -o web https://github.com/yonggekkk/Cloudflare_vless_trojan/releases/download/serv00/sb
     curl -L -sS -o bot https://github.com/yonggekkk/Cloudflare_vless_trojan/releases/download/serv00/server
     chmod +x web bot
     echo "web" > sb.txt
-    echo "bot" > ag.txt
-
-    # 生成密钥与配置 (参考勇哥逻辑)
+    
+    # 生成 Reality 密钥
     output=$(./web generate reality-keypair)
     private_key=$(echo "${output}" | awk '/PrivateKey:/ {print $2}')
-    public_key=$(echo "${output}" | awk '/PublicKey:/ {print $2}')
+    export public_key=$(echo "${output}" | awk '/PublicKey:/ {print $2}')
     
-    # 生成证书
+    # 证书
     openssl ecparam -genkey -name prime256v1 -out "private.key"
     openssl req -new -x509 -days 3650 -key "private.key" -out "cert.pem" -subj "/CN=$USERNAME" > /dev/null 2>&1
 
+    # 写配置
     cat > config.json <<EOF
 {
   "log": {"level": "info"},
@@ -127,60 +96,69 @@ download_and_run_singbox() {
 EOF
     nohup ./web run -c config.json >/dev/null 2>&1 &
     nohup ./bot tunnel --url http://localhost:$vmess_port --no-autoupdate --logfile boot.log --loglevel info >/dev/null 2>&1 &
-    green "节点核心已启动！"
+    sleep 5
 }
 
-# --- Alist 部署 ---
+# --- 链接生成展示 (这是你最需要的) ---
+show_links() {
+    argodomain=$(cat boot.log 2>/dev/null | grep -a trycloudflare.com | awk 'NR==2{print}' | awk -F// '{print $2}' | awk '{print $1}')
+    [[ -z "$argodomain" ]] && argodomain="等待获取中..."
+
+    clear
+    purple "=========================================="
+    green "  安装成功！以下是你的节点链接 (请妥善保存)"
+    purple "=========================================="
+    
+    yellow "1. VLESS-Reality 链接:"
+    echo "vless://$UUID@$IP:$vless_port?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$reym&fp=chrome&pbk=$public_key&type=tcp&headerType=none#$snb-Reality"
+    echo
+    
+    yellow "2. Hysteria2 链接:"
+    echo "hysteria2://$UUID@$IP:$hy2_port?security=tls&sni=www.bing.com&alpn=h3&insecure=1#$snb-Hy2"
+    echo
+    
+    yellow "3. Vmess-Argo (临时隧道) 链接:"
+    vmess_json="{ \"v\": \"2\", \"ps\": \"$snb-Argo\", \"add\": \"www.visa.com.hk\", \"port\": \"8443\", \"id\": \"$UUID\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"$argodomain\", \"path\": \"/$UUID-vm?ed=2048\", \"tls\": \"tls\", \"sni\": \"$argodomain\"}"
+    echo "vmess://$(echo "$vmess_json" | base64 -w0)"
+    echo
+    
+    purple "=========================================="
+    green "Alist 状态: 运行中 (端口 40759)"
+    green "Alist 密码: admin123"
+    purple "=========================================="
+}
+
+# --- Alist 与 保活 ---
 install_alist() {
-    green "正在部署 Alist 并锁定 40759..."
     mkdir -p ~/alist && cd ~/alist
-    if [ ! -f "alist" ]; then
-        wget -q https://github.com/AlistGo/alist/releases/latest/download/alist-freebsd-amd64.tar.gz
-        tar -zxvf alist-freebsd-amd64.tar.gz >/dev/null && chmod +x alist
-    fi
+    wget -q https://github.com/AlistGo/alist/releases/latest/download/alist-freebsd-amd64.tar.gz
+    tar -zxvf alist-freebsd-amd64.tar.gz >/dev/null && chmod +x alist
     ./alist admin set admin123 >/dev/null
     echo '{"address": "0.0.0.0", "port": 40759}' > data/config.json
-    pkill alist
     nohup ./alist server > /dev/null 2>&1 &
-    green "Alist 启动成功，端口: 40759"
 }
 
-# --- 5分钟保活巡逻 ---
 servkeep() {
     cat > ~/serv00keep.sh <<EOF
 #!/bin/bash
-# 巡逻检查
 pgrep -x "web" > /dev/null || (cd $WORKDIR && nohup ./web run -c config.json >/dev/null 2>&1 &)
 pgrep -x "alist" > /dev/null || (cd ~/alist && nohup ./alist server >/dev/null 2>&1 &)
 EOF
     chmod +x ~/serv00keep.sh
     (crontab -l 2>/dev/null | grep -v "serv00keep.sh"; echo "*/5 * * * * ~/serv00keep.sh > /dev/null 2>&1") | crontab -
-    green "5分钟巡逻任务已加入 Crontab"
 }
 
-# --- 安装总控 ---
-install_all() {
-    read_ip && read_reym && read_uuid
-    check_port
-    argo_configure
+# --- 菜单 ---
+clear
+echo "1. 完整安装并获取链接"
+echo "0. 退出"
+read -p "选择: " choice
+if [[ "$choice" == "1" ]]; then
+    read_ip && read_reym && read_uuid && check_port
     download_and_run_singbox
     install_alist
     servkeep
-    echo -e "${green}全部安装完成！节点和 Alist 均已上线。${re}"
-}
-
-# --- 主菜单 ---
-clear
-echo -e "${purple}==========================================${re}"
-echo -e "${purple}   tujiaojie 完全体脚本 (勇哥内核版)     ${re}"
-echo -e "${purple}==========================================${re}"
-echo "1. 完整安装 (节点+Alist+保活)"
-echo "2. 卸载并清理"
-echo "0. 退出"
-reading "请选择: " choice
-
-case "$choice" in
-    1) install_all ;;
-    2) pkill -u $(whoami); rm -rf ~/alist ~/domains/* ~/serv00keep.sh; green "已清理" ;;
-    *) exit ;;
-esac
+    show_links
+else
+    exit
+fi
