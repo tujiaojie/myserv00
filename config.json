@@ -2,8 +2,8 @@
   "inbounds": [{
     "type": "vless",
     "listen": "::",
-    "listen_port": 你的端口,
-    "users": [{"uuid": "你的UUID"}],
+    "listen_port": 40759,
+    "users": [{"uuid": "59fbd43f-76d8-41eb-8922-4caf50408c65"}],
     "transport": {"type": "ws", "path": "/chat"}
   }],
   "outbounds": [{"type": "direct"}]
