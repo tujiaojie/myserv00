@@ -1,0 +1,10 @@
+{
+  "inbounds": [{
+    "type": "vless",
+    "listen": "::",
+    "listen_port": 你的端口,
+    "users": [{"uuid": "你的UUID"}],
+    "transport": {"type": "ws", "path": "/chat"}
+  }],
+  "outbounds": [{"type": "direct"}]
+}
