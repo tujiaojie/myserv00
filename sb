@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# --- 基础配置 (已为您精准校对) ---
+# --- 基础配置 ---
 USER_NAME="tujiaojie"
 REPO_NAME="myserv00"
 WORKDIR="$HOME/mynode"
@@ -19,7 +19,6 @@ install_core() {
     if [ ! -f "$SB_BIN" ]; then
         echo -e "${YELLOW}正在下载核心程序...${NC}"
         mkdir -p $WORKDIR && cd $WORKDIR
-        # 使用 ghproxy 加速链接，确保 100% 下载成功
         wget https://ghproxy.net/https://github.com/SagerNet/sing-box/releases/download/v1.8.5/sing-box-1.8.5-freebsd-amd64.tar.gz
         tar -zxvf sing-box-1.8.5-freebsd-amd64.tar.gz
         mv sing-box-1.8.5-freebsd-amd64/sing-box .
@@ -28,16 +27,15 @@ install_core() {
     fi
 }
 
-# --- 同步配置 (核心修正点) ---
+# --- 同步配置 ---
 sync_config() {
-    echo -e "${YELLOW}正在同步 GitHub 配置: $RAW_URL/config.json ...${NC}"
+    echo -e "${YELLOW}正在同步 GitHub 配置...${NC}"
     mkdir -p $WORKDIR
-    # 加上 -q -O 确保下载并覆盖
     wget -q -O $CONFIG "$RAW_URL/config.json"
     if [ $? -ne 0 ]; then
-        echo -e "${RED}❌ 同步失败！请检查 GitHub 仓库名是否为 myserv00${NC}"
+        echo -e "${RED}❌ 同步失败！${NC}"
     else
-        echo -e "${GREEN}✅ 配置已成功从 GitHub 同步！${NC}"
+        echo -e "${GREEN}✅ 配置已成功同步！${NC}"
     fi
 }
 
@@ -66,12 +64,16 @@ show_menu() {
             sleep 2; show_menu ;;
         2) 
             [ ! -f "$CONFIG" ] && echo "请先选择 1 启动节点" && sleep 2 && show_menu
-            PORT=$(grep 'listen_port' $CONFIG | tr -cd '0-9')
-            UUID=$(grep 'uuid' $CONFIG | awk -F'"' '{print $4}')
+            # 精准提取参数
+            PORT=$(grep '"listen_port":' $CONFIG | tr -cd '0-9')
+            UUID=$(grep '"uuid":' $CONFIG | awk -F'"' '{print $4}')
+            # 修正路径提取逻辑，确保拿到的不是 type 而是真正的路径内容
+            PATH_WS=$(grep '"path":' $CONFIG | awk -F'"' '{print $4}')
             IP=$(curl -s ipv4.icanhazip.com)
-            PATH_WS=$(grep 'path' $CONFIG | awk -F'"' '{print $4}')
+            
             echo -e "\n${YELLOW}你的 VLESS 分享链接:${NC}"
-            echo -e "${GREEN}vless://$UUID@$IP:$PORT?encryption=none&security=none&type=ws&path=$PATH_WS#Serv00_tujiaojie${NC}"
+            # 组合链接，确保 path 前面有斜杠
+            echo -e "${GREEN}vless://$UUID@$IP:$PORT?encryption=none&security=none&type=ws&path=${PATH_WS}#Serv00_tujiaojie${NC}"
             echo ""
             read -p "按回车键返回菜单..." ; show_menu ;;
         3) pkill -9 sing-box; echo -e "${RED}服务已停止。${NC}"; sleep 1; show_menu ;;
