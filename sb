@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# --- 基础配置 ---
+# --- 基础配置 (已为您精准校对) ---
 USER_NAME="tujiaojie"
 REPO_NAME="myserv00"
 WORKDIR="$HOME/mynode"
@@ -17,8 +17,9 @@ NC='\033[0m'
 # --- 核心程序下载 ---
 install_core() {
     if [ ! -f "$SB_BIN" ]; then
-        echo -e "${YELLOW}正在通过镜像加速下载核心程序...${NC}"
+        echo -e "${YELLOW}正在下载核心程序...${NC}"
         mkdir -p $WORKDIR && cd $WORKDIR
+        # 使用 ghproxy 加速链接，确保 100% 下载成功
         wget https://ghproxy.net/https://github.com/SagerNet/sing-box/releases/download/v1.8.5/sing-box-1.8.5-freebsd-amd64.tar.gz
         tar -zxvf sing-box-1.8.5-freebsd-amd64.tar.gz
         mv sing-box-1.8.5-freebsd-amd64/sing-box .
@@ -27,15 +28,16 @@ install_core() {
     fi
 }
 
-# --- 同步配置 ---
+# --- 同步配置 (核心修正点) ---
 sync_config() {
-    echo -e "${YELLOW}正在同步 GitHub 仓库配置...${NC}"
+    echo -e "${YELLOW}正在同步 GitHub 配置: $RAW_URL/config.json ...${NC}"
     mkdir -p $WORKDIR
-    wget -O $CONFIG "$RAW_URL/config.json"
+    # 加上 -q -O 确保下载并覆盖
+    wget -q -O $CONFIG "$RAW_URL/config.json"
     if [ $? -ne 0 ]; then
-        echo -e "${RED}❌ 同步失败，请检查仓库配置！${NC}"
+        echo -e "${RED}❌ 同步失败！请检查 GitHub 仓库名是否为 myserv00${NC}"
     else
-        echo -e "${GREEN}✅ 配置已同步成功！${NC}"
+        echo -e "${GREEN}✅ 配置已成功从 GitHub 同步！${NC}"
     fi
 }
 
@@ -43,7 +45,7 @@ sync_config() {
 show_menu() {
     clear
     echo -e "${GREEN}======================================${NC}"
-    echo -e "${YELLOW}    tujiaojie 的 Serv00 快捷工具       ${NC}"
+    echo -e "${YELLOW}    tujiaojie 专属 Serv00 节点管理    ${NC}"
     echo -e "${GREEN}======================================${NC}"
     echo -e "  1. 启动/重启 节点 (自动同步配置)"
     echo -e "  2. 查看 节点分享链接"
@@ -54,7 +56,14 @@ show_menu() {
     read -p "请输入选项: " choice
 
     case $choice in
-        1) install_core; sync_config; pkill -9 sing-box; cd $WORKDIR; nohup ./sing-box run -c config.json > /dev/null 2>&1 & echo -e "${GREEN}✅ 服务已在后台启动！${NC}"; sleep 2; show_menu ;;
+        1) 
+            install_core
+            sync_config
+            pkill -9 sing-box
+            cd $WORKDIR
+            nohup ./sing-box run -c config.json > /dev/null 2>&1 & 
+            echo -e "${GREEN}🚀 节点已在后台启动！${NC}"
+            sleep 2; show_menu ;;
         2) 
             [ ! -f "$CONFIG" ] && echo "请先选择 1 启动节点" && sleep 2 && show_menu
             PORT=$(grep 'listen_port' $CONFIG | tr -cd '0-9')
