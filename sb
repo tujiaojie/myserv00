@@ -8,57 +8,63 @@ SB_BIN="$WORKDIR/sing-box"
 CONFIG="$WORKDIR/config.json"
 RAW_URL="https://raw.githubusercontent.com/$USER_NAME/$REPO_NAME/main"
 
-# 颜色定义
+# 颜色
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# --- 核心程序下载 ---
+# 安装核心 (勇哥同款 FreeBSD 架构)
 install_core() {
     if [ ! -f "$SB_BIN" ]; then
-        echo -e "${YELLOW}正在通过加速镜像下载 sing-box 核心...${NC}"
+        echo -e "${YELLOW}正在获取 sing-box 核心...${NC}"
         mkdir -p $WORKDIR && cd $WORKDIR
-        wget https://ghproxy.net/https://github.com/SagerNet/sing-box/releases/download/v1.8.5/sing-box-1.8.5-freebsd-amd64.tar.gz
-        tar -zxvf sing-box-1.8.5-freebsd-amd64.tar.gz
-        mv sing-box-1.8.5-freebsd-amd64/sing-box .
-        chmod +x sing-box
-        rm -rf sing-box-1.8.5-freebsd-amd64*
+        # 使用勇哥常用的 ghproxy 镜像以保成功
+        wget https://mirror.ghproxy.com/https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-freebsd-amd64.tar.gz
+        tar -zxvf sing-box-1.10.1-freebsd-amd64.tar.gz
+        cp sing-box-*/sing-box . && chmod +x sing-box
+        rm -rf sing-box-1.10.1-freebsd-amd64*
     fi
 }
 
-# --- 同步配置 ---
-sync_config() {
-    echo -e "${YELLOW}正在从 GitHub 同步最新配置...${NC}"
-    mkdir -p $WORKDIR
-    # 使用 -q 保持安静，-O 强制覆盖本地
-    wget -q -O $CONFIG "$RAW_URL/config.json"
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ 配置同步成功！${NC}"
-    else
-        echo -e "${RED}❌ 同步失败，请检查仓库名和 Public 状态！${NC}"
-    fi
-}
-
-# --- 菜单逻辑 ---
+# 管理菜单
 show_menu() {
     clear
     echo -e "${GREEN}======================================${NC}"
-    echo -e "${YELLOW}    tujiaojie 专属 Serv00 管理菜单    ${NC}"
+    echo -e "${YELLOW}    勇哥风格：Serv00 节点管理器       ${NC}"
     echo -e "${GREEN}======================================${NC}"
-    echo -e "  1. 启动/重启 节点 (含同步配置)"
-    echo -e "  2. 查看 VLESS 分享链接"
-    echo -e "  3. 停止 代理服务"
-    echo -e "  4. 彻底卸载 (删除所有文件)"
-    echo -e "  0. 退出脚本"
+    echo -e "  1. 启动/重启 节点 (同步 GitHub 配置)"
+    echo -e "  2. 提取 VLESS 分享链接"
+    echo -e "  3. 停止 节点"
+    echo -e "  0. 退出"
     echo -e "${GREEN}======================================${NC}"
-    read -p "请输入选项: " choice
+    read -p "选择: " choice
 
     case $choice in
         1)
             install_core
-            sync_config
+            wget -q -O $CONFIG "$RAW_URL/config.json"
             pkill -9 sing-box
-            cd $WORKDIR
-            nohup ./sing-box run -c config.json > /dev/null 2>&1 & 
-            echo -e "${GREEN}🚀
+            cd $WORKDIR && nohup ./sing-box run -c config.json > /dev/null 2>&1 & 
+            echo -e "${GREEN}🚀 节点已在后台打火！${NC}"
+            sleep 2; show_menu ;;
+        2)
+            if [ -f "$CONFIG" ]; then
+                # --- 勇哥式精准提取：利用 python 或 grep 强行定位 ---
+                PORT=$(grep -oE '"listen_port": [0-9]+' $CONFIG | awk '{print $2}')
+                UUID=$(grep -oE '"id": "[^"]+"' $CONFIG | head -1 | awk -F'"' '{print $4}')
+                PATH_WS=$(grep -oE '"path": "[^"]+"' $CONFIG | awk -F'"' '{print $4}')
+                IP=$(curl -s ipv4.icanhazip.com)
+                echo -e "\n${YELLOW}您的节点信息:${NC}"
+                echo -e "${GREEN}vless://$UUID@$IP:$PORT?encryption=none&security=none&type=ws&path=$PATH_WS#Serv00_Tujiaojie${NC}\n"
+            else
+                echo -e "${RED}请先执行 1 启动节点${NC}"
+            fi
+            read -p "回车返回..." ; show_menu ;;
+        3) pkill -9 sing-box; echo -e "${RED}已停止${NC}"; sleep 1; show_menu ;;
+        0) exit 0 ;;
+        *) show_menu ;;
+    esac
+}
+
+show_menu
